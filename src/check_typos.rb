@@ -9,11 +9,12 @@ class CheckTypos
     @threshold_second = options[:threshold_second] || 300 # 更新時間がこれ以前のものをupdate_fileと認める
     @permitted_word_file = options[:permitted_word_file] || 'permitted_words'
 
-    @target_files = Dir["{base_dir}/**/*.{#{target_exts.join(',')}}"]
+    @target_files = Dir["#{base_dir}/**/*.{#{target_exts.join(',')}}"]
+    STDERR.puts "target file num: #{@target_files.length}" if @verbose
 
     pairs = getWeirdWordsWithoutPermittedWords
-    new_permitted_pairs = cofirm(pairs)
-    updatePermitPairs(new_permitted_pairs)
+    new_permitted_pairs = confirm(pairs)
+    updatePermitPairs(new_permitted_pairs) if 0 < new_permitted_pairs.length
   end
 
   # :force => trueとすると上書きする
@@ -29,8 +30,8 @@ class CheckTypos
 
   #------------------------------------------------
   def getWeirdWordsWithoutPermittedWords
-    result = getWeirdPairs - getPermittedPairs
-    result.each{|w1, w2| puts "weird_word_without_permit_word:\t#{w1} <-> #{w2}" if @verbose }
+    result = (getWeirdPairs - getPermittedPairs).sort.uniq
+    result.each{|w1, w2| STDERR.puts "weird_word_without_permit_word:\t#{w1} <-> #{w2}" if @verbose }
     result
   end
 
@@ -46,7 +47,8 @@ class CheckTypos
   def updatePermitPairs(pairs)
     open(@permitted_word_file, "w") do |f|
       (@cache_permit_pairs + pairs).map{|w1, w2| [w1, w2].sort}.sort.uniq.each do |w1, w2|
-        f.puts "#{w1}:#{w1}"
+        STDERR.puts "add permit pair:\t#{w1} <-> #{w2}" if @verbose
+        f.puts "#{w1}:#{w2}"
       end
     end
   end
@@ -63,16 +65,16 @@ class CheckTypos
       STDERR.puts "searching: #{path}" if @verbose
       # threshold_secondが指定されていない場合は常にtrue
       if !threshold_second || ((Time.now - threshold_second) < File.mtime(path))
-        words += File.path(path).scan(/\w+/)
+        words += File.read(path).scan(/[a-zA-Z][\w_]{3,}/) # 4文字以上で、かつ、先頭がアルファベットのもののみ対象
       end
     end
-    words.sort.uniq!
+    words.sort.uniq.map{|w| w.downcase}
   end
 
   # wordsのなかでwordとの距離がdistance以下のワードがあればそれを返す
   # 無ければnilを返す
   def getNearestWord(word, words, distance)
-    words.find{|w| levenshteinDistance(word, w) <= distance}
+    words.find{|w| (word != w) && (levenshteinDistance(word, w) <= distance)}
   end
 
   def levenshteinDistance (str1, str2)
@@ -82,19 +84,19 @@ class CheckTypos
    len1 = str1.length
    len2 = str2.length
 
-   (0..len1-1).to_a.each { |i| hash[ i, 0 ] = i }
-   (0..len2-1).to_a.each { |i| hash[ 0, i ] = i }
+   (-1..len1-1).to_a.each { |i| hash[[ i, -1 ]] = i+1 }
+   (-1..len2-1).to_a.each { |i| hash[[ -1, i ]] = i+1 }
 
    (0..len1-1).to_a.each do |i1|
      (0..len2-1).to_a.each do |i2|
-       cost = (str1[i1] == str2[i2]) ? 0 : 1
-         hash[i1,i2] = [ hash[ i1 - 1, i2     ] + 1,
-                         hash[ i1    , i2 - 1 ] + 1,
-                         hash[ i1 - 1, i2 - 1 ] + cost
+       cost = (str1[i1] == str2[i2] || (str1[i1] =~ /\A[0-9]\Z/ && str2[i2] =~ /\A[0-9]\Z/) ) ? 0 : 2
+         hash[[i1,i2]] = [ hash[[ i1 - 1, i2     ]] + 1,
+                           hash[[ i1    , i2 - 1 ]] + 1,
+                           hash[[ i1 - 1, i2 - 1 ]] + cost
          ].min
      end
    end
-   hash[len1-1, len2-1]
+   hash[[len1-1, len2-1]]
   end
 
   def getWeirdPairs
@@ -105,11 +107,23 @@ class CheckTypos
       nw = getNearestWord(word, recent_words + all_words, 2)
       result << [word, nw].sort if nw
     end
-    result.each{|w1, w2| puts "weird_word: #{w1} <-> #{w2}" if @verbose}
+    result.each{|w1, w2| STDERR.puts "weird_word: #{w1} <-> #{w2}" if @verbose}
     result
   end
 
   def getPermittedPairs
-    @cache_permit_pairs ||= File.read(@permitted_word_file).scan(/^(\w+):(\w+)$/).map{|w1, w2| [w1, w2].sort}
+    unless @cache_permit_pairs
+      if File.exist?(@permitted_word_file)
+        @cache_permit_pairs = File.read(@permitted_word_file).scan(/^(\w+):(\w+)$/).map{|w1, w2| [w1, w2].sort}
+      else
+        open(@permitted_word_file, "w"){|f| } # ファイル作成
+        @cache_permit_pairs = []
+      end
+    end
+    @cache_permit_pairs
   end
+end
+
+if __FILE__ == $0
+  CheckTypos.new(Dir.pwd, %w{rb}, :verbose => ENV['VERBOSE'])
 end
