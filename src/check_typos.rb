@@ -86,7 +86,10 @@ class CheckTypos
   # str1とstr2のlevenshtein距離を得る。
   # ただしupperが指定されており、かつlevenshtein距離がそれを超えるならupperが返される。
   def levenshteinDistance(str1, str2, upper = nil)
-    return upper if upper && upper <= (str1.length - str2.length)
+    if upper
+      return upper if upper <= (str1.length - str2.length)
+      return upper if upper <= differenceOfCharacterNum(str1, str2)
+    end
 
     # lenStr1 + 1 行 lenStr2 + 1 列のテーブル d を用意する
     hash = Hash.new
@@ -107,6 +110,15 @@ class CheckTypos
       end
     end
     hash[[len1-1, len2-1]]
+  end
+
+  # str1, str2に出る各キャラクタごとに、その数の差を算出してその和をとる
+  def differenceOfCharacterNum(str1, str2)
+    return 0 if str1.length == 0 and str2.length == 0
+    result = {}
+    str1.each_char{|c| result[c] ||= 0; result[c] += 1 }
+    str1.each_char{|c| result[c] ||= 0; result[c] -= 1 }
+    result.inject(0){|s, (c, num)| s + num.abs}
   end
 
   def getWeirdPairs
