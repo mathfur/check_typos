@@ -65,6 +65,7 @@ class CheckTypos
       STDERR.puts "searching: #{path}" if @verbose
       # threshold_secondが指定されていない場合は常にtrue
       if !threshold_second || ((Time.now - threshold_second) < File.mtime(path))
+        STDERR.print (threshold_second ? "+" : "-") if @verbose
         words += File.read(path).scan(/[a-zA-Z][\w_]{3,}/) # 4文字以上で、かつ、先頭がアルファベットのもののみ対象
       end
     end
@@ -74,35 +75,48 @@ class CheckTypos
   # wordsのなかでwordとの距離がdistance以下のワードがあればそれを返す
   # 無ければnilを返す
   def getNearestWord(word, words, distance)
-    words.find{|w| (word != w) && (levenshteinDistance(word, w) <= distance)}
+    words.find{|w| (word != w) && !levenshteinDistanceIsLarge?(word, w, distance)}
   end
 
-  def levenshteinDistance (str1, str2)
-   # lenStr1 + 1 行 lenStr2 + 1 列のテーブル d を用意する
-   hash = Hash.new
+  # str1とstr2のlevenshtein距離がdistance以上か?
+  def levenshteinDistanceIsLarge?(str1, str2, distance)
+    distance < levenshteinDistance(str1, str2, distance+1)
+  end
 
-   len1 = str1.length
-   len2 = str2.length
+  # str1とstr2のlevenshtein距離を得る。
+  # ただしupperが指定されており、かつlevenshtein距離がそれを超えるならupperが返される。
+  def levenshteinDistance(str1, str2, upper = nil)
+    return upper if upper && upper <= (str1.length - str2.length)
 
-   (-1..len1-1).to_a.each { |i| hash[[ i, -1 ]] = i+1 }
-   (-1..len2-1).to_a.each { |i| hash[[ -1, i ]] = i+1 }
+    # lenStr1 + 1 行 lenStr2 + 1 列のテーブル d を用意する
+    hash = Hash.new
 
-   (0..len1-1).to_a.each do |i1|
-     (0..len2-1).to_a.each do |i2|
-       cost = (str1[i1] == str2[i2] || (str1[i1] =~ /\A[0-9]\Z/ && str2[i2] =~ /\A[0-9]\Z/) ) ? 0 : 2
-         hash[[i1,i2]] = [ hash[[ i1 - 1, i2     ]] + 1,
-                           hash[[ i1    , i2 - 1 ]] + 1,
-                           hash[[ i1 - 1, i2 - 1 ]] + cost
-         ].min
-     end
-   end
-   hash[[len1-1, len2-1]]
+    len1 = str1.length
+    len2 = str2.length
+
+    (-1..len1-1).to_a.each { |i| hash[[ i, -1 ]] = i+1 }
+    (-1..len2-1).to_a.each { |i| hash[[ -1, i ]] = i+1 }
+
+    (0..len1-1).to_a.each do |i1|
+      (0..len2-1).to_a.each do |i2|
+        cost = (str1[i1] == str2[i2] || (str1[i1] =~ /\A[0-9]\Z/ && str2[i2] =~ /\A[0-9]\Z/) ) ? 0 : 2
+        hash[[i1,i2]] = [ hash[[ i1 - 1, i2     ]] + 1,
+                          hash[[ i1    , i2 - 1 ]] + 1,
+                          hash[[ i1 - 1, i2 - 1 ]] + cost
+                        ].min
+      end
+    end
+    hash[[len1-1, len2-1]]
   end
 
   def getWeirdPairs
     all_words = getAllWords
     result = []
     recent_words = getWordsOnUpdatedFiles(@threshold_second)
+
+    STDERR.puts "recent_words: #{recent_words.size}" if @verbose
+    STDERR.puts "all_words: #{all_words.size}" if @verbose
+
     recent_words.each do |word|
       nw = getNearestWord(word, recent_words + all_words, 2)
       result << [word, nw].sort if nw
